@@ -1,7 +1,16 @@
 #!/bin/zsh
+export SSH_TUNNEL_MGR_VERSION="v1.01"
 
-export PATH="/opt/homebrew/bin:$PATH"
-export SSH_ASKPASS=/opt/homebrew/bin/ssh-askpass
+if [[ $(uname -m) == 'arm64' ]]; then
+    export PATH="/opt/homebrew/bin:$PATH"
+    export SSH_ASKPASS=/opt/homebrew/bin/ssh-askpass
+    export SSH_TUNNEL_MGR_CPU_MODE="Apple silicon"
+else
+    export PATH="/usr/local/bin:$PATH"
+    export SSH_ASKPASS=/usr/local/bin/ssh-askpass
+    export SSH_TUNNEL_MGR_CPU_MODE="Intel silicon"
+fi
+
 export SSH_ASKPASS_REQUIRE=force
 
 current_script=$(realpath "$0")
@@ -163,6 +172,9 @@ xbar_menu() {
 
     echo "---"
     echo "Disconnect All | bash='$current_script' param1=stop_all terminal=false"
+
+    echo "---"
+    echo "$SSH_TUNNEL_MGR_VERSION ($SSH_TUNNEL_MGR_CPU_MODE)"
 }
 
 # Main function
