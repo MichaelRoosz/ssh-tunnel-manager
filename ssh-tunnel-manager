@@ -1,5 +1,5 @@
 #!/bin/zsh
-export SSH_TUNNEL_MGR_VERSION="v1.0.3"
+export SSH_TUNNEL_MGR_VERSION="v1.0.4"
 
 if [[ $(uname -m) == 'arm64' ]]; then
     export PATH="/opt/homebrew/bin:$PATH"
@@ -17,7 +17,7 @@ current_script=$(realpath "$0")
 
 config_dir="$HOME/ssh-tunnels"
 
-ssh_arguments="24afxNT"
+ssh_arguments="24anxNT"
 
 start_tunnel() {
     local config_file="$1"
@@ -173,6 +173,9 @@ xbar_menu() {
 
     echo "---"
     echo "Disconnect All | bash='$current_script' param1=stop_all terminal=false"
+
+    echo "---"
+    echo "Reset ssh-askpass | bash='killall' param1='System Events' terminal=false"
 
     echo "---"
     echo "$SSH_TUNNEL_MGR_VERSION ($SSH_TUNNEL_MGR_CPU_MODE)"
