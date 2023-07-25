@@ -1,5 +1,5 @@
 #!/bin/zsh
-export SSH_TUNNEL_MGR_VERSION="v1.0.4"
+export SSH_TUNNEL_MGR_VERSION="v1.0.5"
 
 if [[ $(uname -m) == 'arm64' ]]; then
     export PATH="/opt/homebrew/bin:$PATH"
@@ -41,11 +41,11 @@ start_tunnel() {
 
     # Check if it's a dynamic (SOCKS) or normal tunnel
     if [ "$tunnel_type" = "socks" ]; then
-        ssh -${ssh_arguments}D "localhost:$localport" -i "$identity" -p "$port" "$user"@"$host" -o ExitOnForwardFailure=yes -o ControlPath=none "${options_array[@]}"
+        ssh -${ssh_arguments}D "localhost:$localport" -i "$identity" -p "$port" "$user"@"$host" -o ExitOnForwardFailure=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new "${options_array[@]}"
     else
         local remotehost=$(echo "$tunnel_data" | jq -r '.remotehost')
         local remoteport=$(echo "$tunnel_data" | jq -r '.remoteport')
-        ssh -${ssh_arguments}L "localhost:$localport:$remotehost:$remoteport" -i "$identity" -p "$port" "$user"@"$host" -o ExitOnForwardFailure=yes -o ControlPath=none "${options_array[@]}"
+        ssh -${ssh_arguments}L "localhost:$localport:$remotehost:$remoteport" -i "$identity" -p "$port" "$user"@"$host" -o ExitOnForwardFailure=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new "${options_array[@]}"
     fi
 
     jq -r "(.\"$tunnel_name\").stopped = false" "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
