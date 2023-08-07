@@ -1,5 +1,5 @@
 #!/bin/zsh
-export SSH_TUNNEL_MGR_VERSION="v1.0.7"
+export SSH_TUNNEL_MGR_VERSION="v1.0.8"
 
 if [[ $(uname -m) == 'arm64' ]]; then
     export PATH="/opt/homebrew/bin:$PATH"
@@ -12,6 +12,7 @@ else
 fi
 
 export SSH_ASKPASS_REQUIRE=force
+export SSH_AUTH_SOCK=~/.ssh/agent
 
 current_script=$(realpath "$0")
 
@@ -20,6 +21,9 @@ config_dir="$HOME/ssh-tunnels"
 ssh_arguments="24afnxNT"
 
 start_tunnel() {
+
+    killall 'System Events'
+
     local config_file="$1"
     local tunnel_name="$2"
 
@@ -39,19 +43,34 @@ start_tunnel() {
         options_array+=("$line")
     done <<< "$options"
 
+    local ssh_output
+    local ssh_exit_code
+
     # Check if it's a dynamic (SOCKS) or normal tunnel
     if [ "$tunnel_type" = "socks" ]; then
-        ssh -${ssh_arguments}D "localhost:$localport" -i "$identity" -p "$port" "$user"@"$host" -F /dev/null -o ExitOnForwardFailure=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new -o TCPKeepAlive=yes "${options_array[@]}"
+        ssh_output=$(ssh -${ssh_arguments}D "localhost:$localport" -i "$identity" -p "$port" "$user"@"$host" -F /dev/null -o ExitOnForwardFailure=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new -o TCPKeepAlive=yes -o AddKeysToAgent=yes "${options_array[@]}" 2>&1)
+        ssh_exit_code=$?
     else
         local remotehost=$(echo "$tunnel_data" | jq -r '.remotehost')
         local remoteport=$(echo "$tunnel_data" | jq -r '.remoteport')
-        ssh -${ssh_arguments}L "localhost:$localport:$remotehost:$remoteport" -i "$identity" -p "$port" "$user"@"$host" -F /dev/null -o ExitOnForwardFailure=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new -o TCPKeepAlive=yes "${options_array[@]}"
+        ssh_output=$(ssh -${ssh_arguments}L "localhost:$localport:$remotehost:$remoteport" -i "$identity" -p "$port" "$user"@"$host" -F /dev/null -o ExitOnForwardFailure=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new -o TCPKeepAlive=yes -o AddKeysToAgent=yes "${options_array[@]}" 2>&1)
+        ssh_exit_code=$?
     fi
 
     jq -r "(.\"$tunnel_name\").stopped = false" "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
+
+    if [ $ssh_exit_code -ne 0 ]; then
+        local dialog_content="The ssh tunnel connection failed\n\n${ssh_output}"
+        dialog_content="${dialog_content//$'\n'/\n\n}" # double newlines
+        dialog_content="${dialog_content//\"/\\\"}"  # replace double-quote with: \"
+        osascript -e "display dialog \"$dialog_content\" with icon stop with title \"SSH Tunnel Error\" buttons {\"OK\"} default button \"OK\""
+    fi
 }
 
 stop_tunnel() {
+
+    killall 'System Events'
+
     local config_file="$1"
     local tunnel_name="$2"
 
@@ -62,6 +81,9 @@ stop_tunnel() {
 }
 
 stop_all_tunnels() {
+
+    killall 'System Events'
+
     local config_files=("$config_dir"/*.json)
 
     for config_file in "${config_files[@]}"; do
@@ -118,6 +140,7 @@ toggle_autoconnect() {
 
     # Update the config file with the new value
     jq -r "(.\"$tunnel_name\").autoconnect = $autoconnect" "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
+    jq -r "(.\"$tunnel_name\").autoconnect_count = 0" "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
 }
 
 # Function to display the menu in xbar
@@ -151,6 +174,7 @@ xbar_menu() {
 
             # Load current autoconnect value
             local autoconnect=$(echo "$tunnel_data" | jq -r '.autoconnect')
+            local autoconnect_count=$(echo "$tunnel_data" | jq -r '.autoconnect_count')
             local stopped=$(echo "$tunnel_data" | jq -r '.stopped')
 
             # Toggle the value
@@ -158,7 +182,15 @@ xbar_menu() {
                 local autoconnect_status="on"
 
                 if [ "$connection_action" = "start" ] && [ "$stopped" != "true" ]; then
-                    start_tunnel $config_file $tunnel_name
+                    if [ $autoconnect_count -lt 2 ]; then
+
+                        ((autoconnect_count++))
+                        jq -r "(.\"$tunnel_name\").autoconnect_count = $autoconnect_count" "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
+
+                        start_tunnel $config_file $tunnel_name
+                    else
+                        toggle_autoconnect $config_file $tunnel_name
+                    fi
                 fi
             else
                 local autoconnect_status="off"
