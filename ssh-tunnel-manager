@@ -1,5 +1,5 @@
 #!/bin/zsh
-export SSH_TUNNEL_MGR_VERSION="v1.0.8"
+export SSH_TUNNEL_MGR_VERSION="v1.0.9"
 
 if [[ $(uname -m) == 'arm64' ]]; then
     export PATH="/opt/homebrew/bin:$PATH"
@@ -145,7 +145,14 @@ toggle_autoconnect() {
 
 # Function to display the menu in xbar
 xbar_menu() {
+
+    setopt +o nomatch
     local config_files=("$config_dir"/*.json)
+
+    if [ "$config_files" = "$config_dir/*.json" ]; then
+        config_files=""
+    fi
+    setopt -o nomatch
 
     echo "SSH Tunnels"
     echo "---"
