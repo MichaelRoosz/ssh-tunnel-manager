@@ -1,5 +1,5 @@
 #!/bin/zsh
-export SSH_TUNNEL_MGR_VERSION="v1.0.9"
+export SSH_TUNNEL_MGR_VERSION="v1.0.10"
 
 if [[ $(uname -m) == 'arm64' ]]; then
     export PATH="/opt/homebrew/bin:$PATH"
@@ -12,7 +12,10 @@ else
 fi
 
 export SSH_ASKPASS_REQUIRE=force
-export SSH_AUTH_SOCK=~/.ssh/agent
+
+if [ -S ~/.ssh/agent ]; then
+    export SSH_AUTH_SOCK=~/.ssh/agent
+fi
 
 current_script=$(realpath "$0")
 
