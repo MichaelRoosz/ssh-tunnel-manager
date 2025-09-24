@@ -174,7 +174,7 @@ tunnel_info() {
         done <<< "$tunnel_options"
 
         # Create the dialog content
-        local dialog_content="Tunnel Info: $tunnel_name\n\nType: $tunnel_type\nUser: $user\nHost: $host\nPort: $port\nLocal Port: $localport\nIdentity: $identity\nOptions:\n$options\nTunnel Options:\n$tunnel_options"
+        local dialog_content="Tunnel Info: $tunnel_name\n\nType: $tunnel_type\nUser: $user\nHost: $host\nPort: $port\nIdentity: $identity\nOptions:\n$options\nTunnel Options:\n$tunnel_options"
 
     else
         local remotehost=$(echo "$tunnel_data" | jq -r '.remotehost')
