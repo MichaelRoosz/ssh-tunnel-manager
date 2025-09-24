@@ -1,5 +1,5 @@
 #!/bin/zsh
-export SSH_TUNNEL_MGR_VERSION="v1.0.10"
+export SSH_TUNNEL_MGR_VERSION="v1.1.0"
 
 if [[ $(uname -m) == 'arm64' ]]; then
     export PATH="/opt/homebrew/bin:$PATH"
@@ -23,6 +23,32 @@ config_dir="$HOME/ssh-tunnels"
 
 ssh_arguments="24afnxNT"
 
+quoteRe() { sed -e 's/[^^]/[&]/g; s/\^/\\^/g; $!a\'$'\n''\\n' <<<"$1" | tr -d '\n'; }
+
+get_tunnel_identifier() {
+    local config_file="$1"
+    local tunnel_name="$2"
+
+    local tunnel_data=$(jq -r ".\"$tunnel_name\"" "$config_file")
+
+    local tunnel_type=$(echo "$tunnel_data" | jq -r '.tunnel_type')
+    if [ "$tunnel_type" = "multiple" ]; then
+        local tunnel_options=$(echo "$tunnel_data" | jq -r '.tunnel_options[]')#
+        local tunnel_options_array=()
+        while IFS= read -r line; do
+            tunnel_options_array+=("$line")
+        done <<< "$tunnel_options"
+        local tunnel_identifier_prefix=$(quoteRe "${tunnel_options_array[@]}")
+        local tunnel_identifier="${tunnel_identifier_prefix}[ ]+"
+    else
+        local localport=$(echo "$tunnel_data" | jq -r '.localport')
+        local tunnel_identifier_prefix=$(quoteRe "localhost:${localport}")
+        local tunnel_identifier="${tunnel_identifier_prefix}[ :]+"
+    fi
+
+    echo "$tunnel_identifier"
+}
+
 start_tunnel() {
 
     killall 'System Events'
@@ -40,11 +66,31 @@ start_tunnel() {
     local autoconnect=$(echo "$tunnel_data" | jq -r '.autoconnect')
     local localport=$(echo "$tunnel_data" | jq -r '.localport')
     local options=$(echo "$tunnel_data" | jq -r '.options[]')
+    local tunnel_options=$(echo "$tunnel_data" | jq -r '.tunnel_options[]')
+    local loopback_aliases=$(echo "$tunnel_data" | jq -r '.loopback_aliases[]')
 
     local options_array=()
     while IFS= read -r line; do
         options_array+=("$line")
     done <<< "$options"
+
+    local tunnel_options_array=()
+    while IFS= read -r line; do
+        tunnel_options_array+=("$line")
+    done <<< "$tunnel_options"
+
+    local loopback_aliases_array=()
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            loopback_aliases_array+=("$line")
+        fi
+    done <<< "$loopback_aliases"
+    
+    if [ ${#loopback_aliases_array[@]} -gt 0 ]; then
+        for loopback_alias in "${loopback_aliases_array[@]}"; do
+            SUDO_ASKPASS=$SSH_ASKPASS sudo --askpass ifconfig lo0 alias "$loopback_alias"
+        done
+    fi
 
     local ssh_output
     local ssh_exit_code
@@ -52,6 +98,9 @@ start_tunnel() {
     # Check if it's a dynamic (SOCKS) or normal tunnel
     if [ "$tunnel_type" = "socks" ]; then
         ssh_output=$(ssh -${ssh_arguments}D "localhost:$localport" -i "$identity" -p "$port" "$user"@"$host" -F /dev/null -o ExitOnForwardFailure=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new -o TCPKeepAlive=yes -o AddKeysToAgent=yes "${options_array[@]}" 2>&1)
+        ssh_exit_code=$?
+    elif [ "$tunnel_type" = "multiple" ]; then
+        ssh_output=$(ssh -${ssh_arguments} "${tunnel_options_array[@]}" -i "$identity" -p "$port" "$user"@"$host" -F /dev/null -o ExitOnForwardFailure=yes -o ControlPath=none -o StrictHostKeyChecking=accept-new -o TCPKeepAlive=yes -o AddKeysToAgent=yes "${options_array[@]}" 2>&1)
         ssh_exit_code=$?
     else
         local remotehost=$(echo "$tunnel_data" | jq -r '.remotehost')
@@ -77,8 +126,9 @@ stop_tunnel() {
     local config_file="$1"
     local tunnel_name="$2"
 
-    local localport=$(jq -r ".\"$tunnel_name\".localport" "$config_file")
-    pkill -f "ssh.*-${ssh_arguments}[LD] localhost:${localport}[ :].*ExitOnForwardFailure=yes.*"
+    local tunnel_identifier=$(get_tunnel_identifier "$config_file" "$tunnel_name")
+
+    pkill -f "ssh.*-${ssh_arguments}[LD ]+${tunnel_identifier}.*ExitOnForwardFailure=yes.*"
 
     jq -r "(.\"$tunnel_name\").stopped = true" "$config_file" > "$config_file.tmp" && mv "$config_file.tmp" "$config_file"
 }
@@ -114,13 +164,24 @@ tunnel_info() {
 
     if [ "$tunnel_type" = "socks" ]; then
         # Create the dialog content
-        local dialog_content="Tunnel Info: $tunnel_name\n\nType: $tunnel_type\nUser: $user\nHost: $host\nPort: $port\nLocal Port: $localport\nIdentity: $identity\nOptions: $options"
+        local dialog_content="Tunnel Info: $tunnel_name\n\nType: $tunnel_type\nUser: $user\nHost: $host\nPort: $port\nLocal Port: $localport\nIdentity: $identity\nOptions:\n$options"
+
+    elif [ "$tunnel_type" = "multiple" ]; then
+        local tunnel_options=$(echo "$tunnel_data" | jq -r '.tunnel_options[]')
+        local tunnel_options_array=()
+        while IFS= read -r line; do
+            tunnel_options_array+=("$line")
+        done <<< "$tunnel_options"
+
+        # Create the dialog content
+        local dialog_content="Tunnel Info: $tunnel_name\n\nType: $tunnel_type\nUser: $user\nHost: $host\nPort: $port\nLocal Port: $localport\nIdentity: $identity\nOptions:\n$options\nTunnel Options:\n$tunnel_options"
+
     else
         local remotehost=$(echo "$tunnel_data" | jq -r '.remotehost')
         local remoteport=$(echo "$tunnel_data" | jq -r '.remoteport')
 
         # Create the dialog content
-        local dialog_content="Tunnel Info: $tunnel_name\n\nType: $tunnel_type\nUser: $user\nHost: $host\nPort: $port\nLocal Port: $localport\nRemote Host: $remotehost\nRemote Port: $remoteport\nIdentity: $identity\nOptions: $options"
+        local dialog_content="Tunnel Info: $tunnel_name\n\nType: $tunnel_type\nUser: $user\nHost: $host\nPort: $port\nLocal Port: $localport\nRemote Host: $remotehost\nRemote Port: $remoteport\nIdentity: $identity\nOptions:\n$options"
     fi
 
     # Show the dialog window using osascript
@@ -168,9 +229,9 @@ xbar_menu() {
             local tunnel_data=$(jq -r ".\"$tunnel_name\"" "$config_file")
             local tunnel_status="🔴"   # Emoji: Red circle for offline tunnel
 
-            local localport=$(echo "$tunnel_data" | jq -r '.localport')
+            local tunnel_identifier=$(get_tunnel_identifier "$config_file" "$tunnel_name")
 
-            if pgrep -f "ssh.*-${ssh_arguments}[LD] localhost:${localport}[ :].*ExitOnForwardFailure=yes.*" > /dev/null; then
+            if pgrep -f "ssh.*-${ssh_arguments}[LD ]+${tunnel_identifier}.*ExitOnForwardFailure=yes.*" > /dev/null; then
                 tunnel_status="🟢"   # Emoji: Green circle for running tunnel
             fi
 
